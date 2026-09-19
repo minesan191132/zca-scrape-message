@@ -54,10 +54,31 @@ export class CdpPage {
         });
     }
 
-    private send(method: string, params: Record<string, unknown> = {}): Promise<any> {
+    /**
+     * Zalo Desktop can go quiet on a specific command (renderer briefly
+     * blocked, execution context torn down by a navigation, etc.) without
+     * ever closing the WebSocket — without a timeout, `await`s on `send()`
+     * hang forever with no error, no log, nothing (see history/watch.ts's
+     * scrapeAndSaveLatest chain silently stalling after a notification).
+     */
+    private send(method: string, params: Record<string, unknown> = {}, timeoutMs = 15_000): Promise<any> {
         const id = ++this.nextId;
         return new Promise((resolve, reject) => {
-            this.pending.set(id, { resolve, reject });
+            const timer = setTimeout(() => {
+                if (this.pending.delete(id)) {
+                    reject(new Error(`CDP command "${method}" (id=${id}) timed out after ${timeoutMs}ms — no response from Zalo Desktop's debug port.`));
+                }
+            }, timeoutMs);
+            this.pending.set(id, {
+                resolve: (v) => {
+                    clearTimeout(timer);
+                    resolve(v);
+                },
+                reject: (e) => {
+                    clearTimeout(timer);
+                    reject(e);
+                },
+            });
             this.ws.send(JSON.stringify({ id, method, params }));
         });
     }

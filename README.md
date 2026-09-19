@@ -114,6 +114,42 @@ tài khoản cần lấy dữ liệu theo cách dùng bình thường).
 npm run mcp                 # chạy mcp/server.ts qua stdio
 ```
 
+## Chạy debug thủ công (mở cổng CDP mà không qua bot)
+
+Muốn tự mở Zalo Desktop kèm cổng debug để soi DOM/probe CDP thủ công (VD
+khi cần cập nhật lại selector ở phần dưới) mà không cần chạy cả một lượt
+`index.ts`, chạy 1 lệnh duy nhất:
+
+```bash
+npm run zalo:debug          # tắt/mở lại Zalo Desktop kèm --remote-debugging-port, rồi thoát
+```
+
+Lệnh này chỉ gọi `ensureZaloReady()` (`debug-zalo.ts` → dùng lại đúng logic
+tắt/mở lại app + tự dò `Zalo-<version>` mới nhất của `history/desktopScraper.ts`,
+xem mục "Luồng hoạt động" ở trên) rồi in ra URL debug và thoát, **không**
+đụng vào `config.targets` hay `data/` — dùng để chuẩn bị port debug trước
+khi tự probe CDP thủ công (VD `Runtime.evaluate` qua `history/cdp.ts`, hoặc
+DevTools tương đương), không phải để lấy dữ liệu.
+
+Muốn tự làm từng bước (không qua npm script) hoặc port debug bị chiếm bởi
+lý do khác thì làm thủ công bằng PowerShell:
+
+```powershell
+taskkill /IM Zalo.exe /F
+$zaloDir = Get-ChildItem "$env:LOCALAPPDATA\Programs\Zalo" -Directory -Filter "Zalo-*" |
+    Sort-Object Name -Descending | Select-Object -First 1
+Start-Process "$($zaloDir.FullName)\Zalo.exe" --remote-debugging-port=9222
+```
+
+Kiểm tra cổng debug đã mở chưa (cả 2 cách trên):
+
+```bash
+curl http://127.0.0.1:9222/json/version
+```
+
+Có kết quả JSON (không lỗi connection refused) nghĩa là CDP đã sẵn sàng.
+Đổi `9222` nếu bạn đã đổi `config.cdpPort`.
+
 ## Dữ liệu đầu ra
 
 ### 1. `data/<thread-slug>.jsonl` — kho lưu vĩnh viễn
@@ -235,9 +271,9 @@ Xếp theo khả năng gặp phải, cao → thấp:
    Gắn chặt vào bản UI hiện tại của Zalo Desktop; mỗi lần Zalo tự động
    update giao diện, các class này có thể đổi và scraper sẽ âm thầm trả về
    rỗng hoặc báo `"sidebar item for ... not found"`. Dấu hiệu: số tin scan
-   được tụt về 0 dù nhóm vẫn có tin mới. Cách sửa: chạy lại một probe CDP
-   thủ công (mở port debug, `Runtime.evaluate` để soi DOM mới — xem lại
-   cách làm ở phần lịch sử spike ban đầu) rồi cập nhật lại selector.
+   được tụt về 0 dù nhóm vẫn có tin mới. Cách sửa: mở lại Zalo Desktop kèm
+   cổng debug thủ công (xem phần "Chạy debug thủ công" ở trên), rồi
+   `Runtime.evaluate` soi DOM mới và cập nhật lại selector.
 
 2. **`config.targets` không tự theo kịp việc đổi tên nhóm** — đổi tên nhóm
    trong Zalo thì phải tự sửa `targets` cho khớp tên mới, **và** lịch sử sẽ

@@ -57,10 +57,7 @@ export async function scrapeAndSaveTarget(page: CdpPage, store: MessageStore, ta
  */
 export async function scrapeAndSaveLatest(page: CdpPage, store: MessageStore, target: string): Promise<void> {
     const opened = await clickConversationWithRetry(page, target, 15_000);
-    if (!opened) {
-        console.warn(`[watch] sidebar item for "${target}" not found — check selectors.conversationTitle`);
-        return;
-    }
+    if (!opened) return;
     await delay(1_000);
 
     const rows = await extractVisibleRows(page);
@@ -133,10 +130,7 @@ export async function waitForSidebarLoaded(page: CdpPage, timeoutMs: number): Pr
  */
 async function scrapeThreadHistory(page: CdpPage, targetName: string): Promise<ScrapedRow[]> {
     const opened = await clickConversationWithRetry(page, targetName, 15_000);
-    if (!opened) {
-        console.warn(`[scrape] sidebar item for "${targetName}" not found — check selectors.conversationTitle`);
-        return [];
-    }
+    if (!opened) return [];
     await delay(1_500);
 
     const collected = new Map<string, ScrapedRow>();
@@ -176,25 +170,44 @@ async function scrapeThreadHistory(page: CdpPage, targetName: string): Promise<S
  */
 async function clickConversationWithRetry(page: CdpPage, targetName: string, timeoutMs: number): Promise<boolean> {
     const deadline = Date.now() + timeoutMs;
+    let lastCandidates: string[] = [];
     while (Date.now() < deadline) {
-        if (await clickConversation(page, targetName)) return true;
+        const result = await clickConversation(page, targetName);
+        if (result.matched) return true;
+        lastCandidates = result.candidates;
         await delay(500);
     }
+    console.warn(
+        `[scrape] sidebar item for "${targetName}" not found after ${timeoutMs}ms — check selectors.conversationTitle.\n` +
+            `  expected (normalized): ${JSON.stringify(targetName)}\n` +
+            `  sidebar titles seen (raw, un-normalized): ${JSON.stringify(lastCandidates)}`,
+    );
     return false;
 }
 
-async function clickConversation(page: CdpPage, targetName: string): Promise<boolean> {
+/**
+ * Compares by trimmed+whitespace-collapsed, NFC-normalized, zero-width-char-
+ * stripped text rather than raw `===` — Vietnamese conversation names can
+ * look identical between the sidebar and the notification popup (which is
+ * what config.targets gets matched against first, in history/watch.ts's
+ * resolveTarget) while differing in Unicode normalization form or carrying
+ * invisible characters (soft-wrap zero-width spaces, NBSP), which would
+ * otherwise make an exact string match fail silently forever.
+ */
+async function clickConversation(page: CdpPage, targetName: string): Promise<{ matched: boolean; candidates: string[] }> {
     const expr = `
 (() => {
+    const norm = (s) => s.normalize("NFC").replace(/[\\u200B-\\u200D\\uFEFF]/g, "").replace(/\\s+/g, " ").trim();
+    const wanted = norm(${JSON.stringify(targetName)});
     const titles = Array.from(document.querySelectorAll(${JSON.stringify(selectors.conversationTitle)}));
-    const target = titles.find((t) => t.textContent.trim() === ${JSON.stringify(targetName)});
-    if (!target) return false;
+    const target = titles.find((t) => norm(t.textContent || "") === wanted);
+    if (!target) return { matched: false, candidates: titles.map((t) => t.textContent || "") };
     const item = target.closest(${JSON.stringify(selectors.conversationItem)});
-    if (!item) return false;
+    if (!item) return { matched: false, candidates: titles.map((t) => t.textContent || "") };
     item.click();
-    return true;
+    return { matched: true, candidates: [] };
 })()`;
-    return page.evaluate<boolean>(expr);
+    return page.evaluate<{ matched: boolean; candidates: string[] }>(expr);
 }
 
 async function extractVisibleRows(page: CdpPage): Promise<ScrapedRow[]> {

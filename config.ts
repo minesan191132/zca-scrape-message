@@ -70,7 +70,7 @@ export const config = {
      *
      * Example: targets: ["IT Foundation", "Gia đình"],
      */
-    targets: ["bot_test_1"] as string[],
+    targets: ["Vibecode-Dev"] as string[],
 
     /**
      * Only keep messages at or after this time (unix ms) — scrolling stops
